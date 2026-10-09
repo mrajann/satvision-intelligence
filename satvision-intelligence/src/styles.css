@@ -185,3 +185,87 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+.satvision-map .leaflet-container {
+  background: var(--background);
+  font-family: var(--font-sans);
+}
+
+.satvision-map .leaflet-control-zoom,
+.satvision-map .leaflet-control-scale-line {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--panel) 94%, transparent);
+  color: var(--foreground);
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--background) 55%, transparent);
+}
+
+.satvision-map .leaflet-control-zoom a {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--foreground);
+}
+
+.satvision-map .leaflet-control-zoom a:hover {
+  background: var(--accent);
+  color: var(--primary);
+}
+
+.satvision-map .leaflet-control-attribution {
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  color: var(--muted-foreground);
+}
+
+.satvision-map .leaflet-control-attribution a {
+  color: var(--primary);
+}
+
+.satvision-marker-shell {
+  background: transparent;
+  border: 0;
+}
+
+.satvision-marker {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--marker-color);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--marker-color) 18%, transparent);
+  box-shadow: 0 0 16px color-mix(in oklab, var(--marker-color) 65%, transparent);
+}
+
+.satvision-marker.is-active {
+  animation: satvision-marker-pulse 1.8s ease-out infinite;
+}
+
+.satvision-marker > span {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--foreground);
+  border-radius: 50%;
+  background: var(--marker-color);
+}
+
+.satvision-map .leaflet-popup-content-wrapper,
+.satvision-map .leaflet-popup-tip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--foreground);
+}
+
+.satvision-map .leaflet-popup-content {
+  margin: 14px;
+}
+
+.satvision-map .leaflet-popup-close-button {
+  color: var(--muted-foreground);
+}
+
+@keyframes satvision-marker-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--marker-color) 55%, transparent); }
+  70% { box-shadow: 0 0 0 14px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import {
   AlertTriangle,
   BrainCircuit,
@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Crosshair,
   FileImage,
+  Globe2,
   Layers3,
   LocateFixed,
   Minus,
@@ -16,12 +17,25 @@ import {
   ScanLine,
   UploadCloud,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { analyzeImage, type Analysis } from "@/lib/analyze.functions";
+import type { MapIncident } from "@/components/satellite-map";
+
+const SatelliteMap = lazy(() => import("@/components/satellite-map"));
 
 const FAIL = "Geospatial processing failed. Please ensure file is a valid image format.";
+function parseCoordinates(value: string): [number, number] | null {
+  const numbers = value.match(/-?\d+(?:\.\d+)?/g)?.map(Number);
+  if (!numbers || numbers.length < 2) return null;
+  let [lat, lng] = numbers;
+  if (lat === undefined || lng === undefined || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (/\bS\b/i.test(value)) lat = -Math.abs(lat);
+  if (/\bW\b/i.test(value)) lng = -Math.abs(lng);
+  return [lat, lng];
+}
 async function toDataUrl(src: string): Promise<string> {
   const img = new Image();
   img.crossOrigin = "anonymous";
@@ -71,6 +85,7 @@ type Incident = {
   terrain: { label: string; value: string }[];
   insights: string[];
   anomalies?: string[];
+  position: [number, number];
 };
 
 const incidents: Incident[] = [
@@ -79,7 +94,8 @@ const incidents: Incident[] = [
     name: "California Wildfire Anomaly",
     area: "Sierra National Forest, CA",
     image: wildfireImage,
-    coordinates: "37.2846° N, 119.6428° W",
+    coordinates: "37.7749° N, 122.4194° W",
+    position: [37.7749, -122.4194],
     resolution: "10 m/px",
     sensor: "Sentinel-2 / MSI",
     severity: "Critical",
@@ -104,7 +120,8 @@ const incidents: Incident[] = [
     name: "Suez Canal Vessel Congestion",
     area: "Port Said, Egypt",
     image: suezImage,
-    coordinates: "31.1894° N, 32.3280° E",
+    coordinates: "30.5852° N, 32.2654° E",
+    position: [30.5852, 32.2654],
     resolution: "0.5 m/px",
     sensor: "WorldView-3 / VNIR",
     severity: "Warning",
@@ -129,10 +146,11 @@ const incidents: Incident[] = [
     name: "Urban Flood Inundation Zone",
     area: "River District, Metro Sector 7",
     image: floodImage,
-    coordinates: "29.7521° N, 95.3487° W",
+    coordinates: "23.8103° N, 90.4125° E",
+    position: [23.8103, 90.4125],
     resolution: "1.2 m/px",
     sensor: "PlanetScope / PSB.SD",
-    severity: "Critical",
+    severity: "Advisory",
     confidence: 92,
     summary: "Floodwater has breached the riverbank and spread into low-lying residential and commercial blocks on both sides of the channel.",
     reason: "Water classification indicates deep inundation across several transport links, with additional expansion likely downstream.",
@@ -164,6 +182,8 @@ function SatVisionDashboard() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<Analysis | null>(null);
+  const [mainView, setMainView] = useState<"canvas" | "map">("canvas");
+  const [customPosition, setCustomPosition] = useState<[number, number] | null>(null);
   const base = incidents[incidentIndex];
   const incident = base && result ? toIncident(base, result) : base;
   const custom = uploaded && !result;
@@ -174,7 +194,7 @@ function SatVisionDashboard() {
     };
   }, [uploaded]);
 
-  if (!incident) return null;
+  if (!base || !incident) return null;
 
   const chooseIncident = (index: number) => {
     setLoading(true);
@@ -182,10 +202,24 @@ function SatVisionDashboard() {
       setIncidentIndex(index);
       setUploaded(null);
       setResult(null);
+      setCustomPosition(null);
       setZoom(1);
       setOffset({ x: 0, y: 0 });
       setLoading(false);
     }, 650);
+  };
+
+  const selectMapIncident = (id: string) => {
+    const index = incidents.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    setIncidentIndex(index);
+    if (id !== "custom") {
+      setUploaded(null);
+      setResult(null);
+      setCustomPosition(null);
+    }
+    setTab("overview");
+    setLoading(false);
   };
 
   const acceptFile = (file?: File) => {
@@ -193,6 +227,7 @@ function SatVisionDashboard() {
     if (!file.type.startsWith("image/") && !/\.(tiff?|png|jpe?g)$/i.test(file.name)) { toast.error(FAIL); return; }
     setResult(null);
     setUploaded({ name: file.name, url: URL.createObjectURL(file) });
+    setCustomPosition(null);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
   };
@@ -206,6 +241,7 @@ function SatVisionDashboard() {
       const res = await analyzeImage({ data: { image: dataUrl, hint: uploaded ? undefined : base.name } });
       if (!res.ok) throw new Error(res.error);
       setResult(res.analysis);
+      if (uploaded) setCustomPosition(parseCoordinates(res.analysis.coordinates) ?? base.position);
       setTab("overview");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : FAIL);
@@ -213,6 +249,10 @@ function SatVisionDashboard() {
       setScanning(false);
     }
   };
+
+  const mapIncidents: MapIncident[] = incidents.map(({ id, name, severity, position }) => ({ id, name, severity, position }));
+  if (uploaded && customPosition) mapIncidents.push({ id: "custom", name: uploaded.name, severity: incident.severity, position: customPosition });
+  const activeMapId = uploaded && customPosition ? "custom" : base.id;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -249,13 +289,16 @@ function SatVisionDashboard() {
             </section>
 
             <section className="overflow-hidden rounded-md border border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-                <div className="flex items-center gap-2 text-xs font-medium"><Crosshair className="size-4 text-primary" /> Multispectral viewport</div>
-                <div className="flex rounded-md border border-border bg-background p-0.5" aria-label="Image mode">
-                  {([false, true] as const).map((value) => <button key={String(value)} onClick={() => setProcessed(value)} className={`rounded-[4px] px-3 py-1.5 text-[11px] font-semibold transition ${processed === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{value ? "Anomaly" : "Raw"}</button>)}
+              <div className="flex flex-col gap-2 border-b border-border p-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex rounded-md border border-border bg-background p-0.5" role="tablist" aria-label="Main visualization">
+                  <Button variant="ghost" size="sm" role="tab" aria-selected={mainView === "canvas"} onClick={() => setMainView("canvas")} className={mainView === "canvas" ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : "text-muted-foreground"}><FileImage />High-Res Canvas</Button>
+                  <Button variant="ghost" size="sm" role="tab" aria-selected={mainView === "map"} onClick={() => setMainView("map")} className={mainView === "map" ? "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : "text-muted-foreground"}><Globe2 />Global Geospatial Map</Button>
                 </div>
+                {mainView === "canvas" && <div className="flex self-end rounded-md border border-border bg-background p-0.5" aria-label="Image mode">
+                  {([false, true] as const).map((value) => <button key={String(value)} onClick={() => setProcessed(value)} className={`rounded-[4px] px-3 py-1.5 text-[11px] font-semibold transition ${processed === value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{value ? "Anomaly" : "Raw"}</button>)}
+                </div>}
               </div>
-              <div
+              {mainView === "canvas" ? <div
                 className={`viewer relative aspect-[16/10] min-h-[360px] overflow-hidden bg-muted ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
                 onPointerDown={(event) => { setDragging(true); dragOrigin.current = { x: event.clientX - offset.x, y: event.clientY - offset.y }; event.currentTarget.setPointerCapture(event.pointerId); }}
                 onPointerMove={(event) => dragging && setOffset({ x: event.clientX - dragOrigin.current.x, y: event.clientY - dragOrigin.current.y })}
@@ -272,7 +315,13 @@ function SatVisionDashboard() {
                   <ControlButton label="Reset view" onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}><Crosshair /></ControlButton>
                 </div>
                 <div className="absolute bottom-4 left-4 rounded bg-panel/90 px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground backdrop-blur">ZOOM {Math.round(zoom * 100)}% &nbsp;•&nbsp; <Move className="inline size-3" /> DRAG TO PAN</div>
-              </div>
+              </div> : <div className="relative aspect-[16/10] min-h-[360px] bg-muted">
+                <ClientOnly fallback={<Skeleton className="absolute inset-0" />}>
+                  <Suspense fallback={<Skeleton className="absolute inset-0" />}>
+                    <SatelliteMap incidents={mapIncidents} activeId={activeMapId} onSelect={selectMapIncident} />
+                  </Suspense>
+                </ClientOnly>
+              </div>}
             </section>
 
             <section className="rounded-md border border-border bg-card p-4">
